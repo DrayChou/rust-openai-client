@@ -23,23 +23,8 @@ async fn main() -> Result<(), eframe::Error> {
     // Log to stdout (if you run with `RUST_LOG=debug`).
     tracing_subscriber::fmt::init();
 
-    let rt = Runtime::new().expect("Unable to create Runtime");
-
-    // Enter the runtime so that `tokio::spawn` is available immediately.
-    let _enter = rt.enter();
-
-    // Execute the runtime in its own thread.
-    // The future doesn't have to do anything. In this example, it just sleeps forever.
-    std::thread::spawn(move || {
-        rt.block_on(async {
-            loop {
-                tokio::time::sleep(Duration::from_secs(3600)).await;
-            }
-        })
-    });
-
     let options = eframe::NativeOptions {
-        initial_window_size: Some(egui::vec2(440.0, 440.0)),
+        initial_window_size: Some(egui::vec2(714.0, 540.0)),
         ..Default::default()
     };
     eframe::run_native(
@@ -61,7 +46,7 @@ fn setup_custom_fonts(ctx: &egui::Context) {
     // 支持 .ttf 和 .otf 文件。
     fonts.font_data.insert(
         "my_font".to_owned(),
-        egui::FontData::from_static(include_bytes!("./../fonts/ZCOOLKuaiLe-Regular.ttf")),
+        egui::FontData::from_static(include_bytes!("./../fonts/LXGWWenKaiMonoLite-Regular.ttf")),
     );
 
     // 将我的字体放在首位（最高优先级）用于比例文本：
@@ -166,29 +151,58 @@ impl MyApp {
     }
 }
 
+// {
+//     "id": "cmpl-uqkvlQyYK7bGYrRHQ0eXlWi7",
+//     "object": "text_completion",
+//     "created": 1589478378,
+//     "model": "text-davinci-003",
+//     "choices": [
+//       {
+//         "text": "\n\nThis is indeed a test",
+//         "index": 0,
+//         "logprobs": null,
+//         "finish_reason": "length"
+//       }
+//     ],
+//     "usage": {
+//       "prompt_tokens": 5,
+//       "completion_tokens": 7,
+//       "total_tokens": 12
+//     }
+// }
+// This `derive` requires the `serde` dependency.
 #[derive(Debug, Deserialize)]
 struct Completion {
     id: String,
     object: String,
     created: u64,
-    model: String,
+    // model: String,
     choices: Vec<Choice>,
 }
 
 #[derive(Debug, Deserialize)]
 struct Choice {
-    text: String,
     index: u32,
-    logprobs: Option<u32>,
+    // text: String,
+    // logprobs: Option<u32>,
+    message: Message,
     finish_reason: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct Message {
+  role: String,
+  content: String
+}
+
+
 fn send_req(token: String, q: String, p: String, tx: Sender<Msg>, ctx: egui::Context) {
     let json = json!({
-        "model": "text-davinci-003",
-        "prompt": &q,
-        "max_tokens": 2048,
-        "temperature": 0
+        "model": "gpt-3.5-turbo",
+        "messages": [{"role": "user", "content": &q}],
+        // "prompt": &q,
+        // "max_tokens": 2048,
+        // "temperature": 0
     });
     println!("json: {:?}", json);
 
@@ -203,14 +217,15 @@ fn send_req(token: String, q: String, p: String, tx: Sender<Msg>, ctx: egui::Con
 
     let client: reqwest::Client;
     if p.to_lowercase().starts_with("http") || p.to_lowercase().starts_with("sock") {
-        let proxy = reqwest::Proxy::http(p).unwrap();
-        client = reqwest::Client::builder().proxy(proxy).build().unwrap();
+        let proxy = reqwest::Proxy::all(p).unwrap();
+        println!("proxy: {:?}", proxy);
+        client = reqwest::Client::builder().proxy(proxy).build().expect("Unable to create client");
     } else {
-        client = reqwest::Client::builder().build().unwrap();
+        client = reqwest::Client::builder().build().expect("Unable to create client");
     }
 
     let response = client
-        .post("https://api.openai.com/v1/completions")
+        .post("https://api.openai.com/v1/chat/completions")
         .headers(headers)
         .json(&json)
         .send();
@@ -234,7 +249,7 @@ fn send_req(token: String, q: String, p: String, tx: Sender<Msg>, ctx: egui::Con
                 if !res1.choices.is_empty() && res1.choices.len() > 0 {
                     println!("res1: {:?}", res1);
 
-                    let _ = tx.send(Msg::new(0, res1.choices[0].text.trim().to_string()));
+                    let _ = tx.send(Msg::new(0, res1.choices[0].message.content.trim().to_string()));
                     ctx.request_repaint();
                 }
             }
@@ -266,10 +281,11 @@ fn query_grants(token: String, p: String, tx: Sender<Msg>, ctx: egui::Context) {
 
     let client: reqwest::Client;
     if p.to_lowercase().starts_with("http") || p.to_lowercase().starts_with("sock") {
-        let proxy = reqwest::Proxy::http(p).unwrap();
-        client = reqwest::Client::builder().proxy(proxy).build().unwrap();
+        let proxy = reqwest::Proxy::all(p).unwrap();
+        println!("proxy: {:?}", proxy);
+        client = reqwest::Client::builder().proxy(proxy).build().expect("Unable to create client");
     } else {
-        client = reqwest::Client::builder().build().unwrap();
+        client = reqwest::Client::builder().build().expect("Unable to create client");
     }
 
     let response = client
@@ -359,34 +375,27 @@ impl eframe::App for MyApp {
             );
         }
 
-        // 中央面板
-        egui::CentralPanel::default().show(ctx, |ui| {
+        // 上面
+        egui::TopBottomPanel::top("my_panel").show(ctx, |ui| {
             // 显示大文本
-            ui.heading("OpenAI ChatGPT 调试小程序");
+            // ui.heading("OpenAI ChatGPT 调试小程序");
 
             // 使用水平布局启动 ui
             ui.horizontal(|ui| {
-                // 显示一些文字
-                let label = ui.label("token: ");
+                // token
+                let label_t = ui.label("token: ");
                 // 不允许换行符，按下回车键将导致失去焦点
-                let text = ui
+                let text_t = ui
                     .text_edit_singleline(&mut self.token)
-                    .labelled_by(label.id);
-                if text.changed() {
-                    println!("token changed: {:?}", self.token);
-                    // 有变更，记录到文本里
-                    std::fs::write("./openai.key", format!("{}\n{}\n", self.token, self.proxy))
-                        .unwrap();
-                }
-            });
+                    .labelled_by(label_t.id);
 
-            // 使用水平布局启动 ui
-            ui.horizontal(|ui| {
-                let label = ui.label("proxy: ");
-                let text = ui
+                // 代理
+                let label_p = ui.label("proxy: ");
+                let text_p = ui
                     .text_edit_singleline(&mut self.proxy)
-                    .labelled_by(label.id);
-                if text.changed() {
+                    .labelled_by(label_p.id);
+
+                if text_t.changed() || text_p.changed() {
                     println!("proxy changed: {:?}", self.proxy);
                     // 有变更，记录到文本里
                     std::fs::write("./openai.key", format!("{}\n{}\n", self.token, self.proxy))
@@ -394,17 +403,18 @@ impl eframe::App for MyApp {
                 }
             });
 
-            // 使用水平布局启动 ui
+            ui.separator();
+
             ui.horizontal(|ui| {
-                let label = ui.label("Q: ");
-                ui.text_edit_multiline(&mut self.q).labelled_by(label.id);
+                ui.label(format!("已用/总额: {}", self.used));
 
                 // 按钮
-                if ui.button("提交").clicked() {
+                let button = ui.add_sized(ui.available_size(), egui::Button::new("提问"));
+                if button.clicked() {
                     self.a = "提交中...".to_owned();
 
                     send_req(
-                        self.token.clone(),
+                        self.token.clone(), 
                         self.q.clone(),
                         self.proxy.clone(),
                         self.tx.clone(),
@@ -412,18 +422,35 @@ impl eframe::App for MyApp {
                     );
                 }
             });
+        });
 
-            // 使用水平布局启动 ui
-            ui.horizontal(|ui| {
-                let label = ui.label("A: ");
+        // 左下
+        egui::SidePanel::left("left_panel").show(ctx, |ui| {
+            let label_q = ui.label("Q: ");
 
-                // 构建 UI 节点
-                ui.add_sized([380.0, 250.0], egui::TextEdit::multiline(&mut self.a))
-                    .labelled_by(label.id);
-            });
+            ui.add_sized(
+                ui.available_size(),
+                egui::TextEdit::multiline(&mut self.q)
+                    .code_editor()
+                    .desired_rows(10)
+                    .lock_focus(false)
+                    .desired_width(f32::INFINITY)
+            ).labelled_by(label_q.id);
+        });
 
-            // 显示一些文字
-            ui.label(format!("已用/总额: {}", self.used));
+        // 右下
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let label_a = ui.label("A: ");
+
+            // 构建 UI 节点
+            ui.add_sized(
+                ui.available_size(),
+                egui::TextEdit::multiline(&mut self.a)
+                    .code_editor()
+                    .desired_rows(10)
+                    .lock_focus(false)
+                    .desired_width(f32::INFINITY)
+            ).labelled_by(label_a.id);
         });
     }
 }
